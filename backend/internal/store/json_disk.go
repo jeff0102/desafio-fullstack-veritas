@@ -93,6 +93,15 @@ func (p *PersistedStore) Delete(ctx context.Context, id string) error {
 	return p.saveSnapshot(ctx)
 }
 
+// NEW: implement Reorder to satisfy TaskStore
+func (p *PersistedStore) Reorder(ctx context.Context, id string, newStatus string, index int) (core.Task, error) {
+	t, err := p.inner.Reorder(ctx, id, newStatus, index)
+	if err != nil {
+		return t, err
+	}
+	return t, p.saveSnapshot(ctx)
+}
+
 func (p *PersistedStore) saveSnapshot(ctx context.Context) error {
 	all, err := p.inner.List(ctx)
 	if err != nil {

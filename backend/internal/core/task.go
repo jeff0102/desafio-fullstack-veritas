@@ -12,6 +12,7 @@ type Task struct {
 	Title       string    `json:"title"`
 	Description string    `json:"description,omitempty"`
 	Status      string    `json:"status"` // todo | doing | done
+	Order       int       `json:"order"`  // 1..N position within its status column
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
@@ -27,6 +28,7 @@ type UpdateTask struct {
 	Title       *string `json:"title,omitempty"`
 	Description *string `json:"description,omitempty"`
 	Status      *string `json:"status,omitempty"`
+	// Order updates are handled by /reorder endpoint; not exposed here to avoid conflicts.
 }
 
 var (
@@ -59,7 +61,6 @@ func ValidateUpdate(in UpdateTask) error {
 	if in.Status != nil {
 		switch *in.Status {
 		case "todo", "doing", "done":
-		// ok
 		default:
 			return ErrInvalidStatus
 		}

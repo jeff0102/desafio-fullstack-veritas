@@ -26,6 +26,8 @@ func (h TaskHandlers) Routes() chi.Router {
 	r.Get("/{id}", h.Get)
 	r.Put("/{id}", h.Update)
 	r.Delete("/{id}", h.Delete)
+	// /tasks/{id}/reorder
+	r.Put("/{id}/reorder", h.Reorder)
 	return r
 }
 
@@ -64,9 +66,12 @@ func (h TaskHandlers) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Sort by updatedAt desc (stable for consistent UI)
+	// Sort by order asc, then updatedAt desc (stable by id if equal)
 	sort.Slice(items, func(i, j int) bool {
-		return items[i].UpdatedAt.After(items[j].UpdatedAt)
+		if items[i].Order == items[j].Order {
+			return items[i].UpdatedAt.After(items[j].UpdatedAt)
+		}
+		return items[i].Order < items[j].Order
 	})
 
 	writeJSON(w, http.StatusOK, items)
@@ -101,7 +106,6 @@ func (h TaskHandlers) Create(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "create_failed")
 		return
 	}
-	// Location header for DX
 	w.Header().Set("Location", "/tasks/"+item.ID)
 	writeJSON(w, http.StatusCreated, item)
 }
@@ -140,4 +144,35 @@ func (h TaskHandlers) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type reorderReq struct {
+	Status string `json:"status"`
+	Index  int    `json:"index"` // 0-based
+}
+
+// PUT /tasks/{id}/reorder
+func (h TaskHandlers) Reorder(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req reorderReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	switch req.Status {
+	case "todo", "doing", "done":
+	default:
+		writeErr(w, http.StatusBadRequest, "invalid_status")
+		return
+	}
+	item, err := h.Store.Reorder(r.Context(), id, req.Status, req.Index)
+	if err != nil {
+		if err == store.ErrNotFound {
+			writeErr(w, http.StatusNotFound, "not_found")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, "reorder_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
 }
