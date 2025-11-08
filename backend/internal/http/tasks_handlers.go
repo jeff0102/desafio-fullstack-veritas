@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
+	"strings"
 
 	"desafio/internal/core"
 	"desafio/internal/store"
@@ -37,12 +39,36 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]any{"error": msg})
 }
 
+// GET /tasks[?status=todo|doing|done]
 func (h TaskHandlers) List(w http.ResponseWriter, r *http.Request) {
 	items, err := h.Store.List(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list_failed")
 		return
 	}
+
+	// Filter by status if provided
+	if raw := strings.TrimSpace(r.URL.Query().Get("status")); raw != "" {
+		switch raw {
+		case "todo", "doing", "done":
+			filtered := make([]core.Task, 0, len(items))
+			for _, t := range items {
+				if t.Status == raw {
+					filtered = append(filtered, t)
+				}
+			}
+			items = filtered
+		default:
+			writeErr(w, http.StatusBadRequest, "invalid_status")
+			return
+		}
+	}
+
+	// Sort by updatedAt desc (stable for consistent UI)
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].UpdatedAt.After(items[j].UpdatedAt)
+	})
+
 	writeJSON(w, http.StatusOK, items)
 }
 
@@ -75,6 +101,8 @@ func (h TaskHandlers) Create(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "create_failed")
 		return
 	}
+	// Location header for DX
+	w.Header().Set("Location", "/tasks/"+item.ID)
 	writeJSON(w, http.StatusCreated, item)
 }
 
