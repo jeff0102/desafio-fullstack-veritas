@@ -1,57 +1,66 @@
 package main
 
 import (
-"encoding/json"
-"log"
-"net/http"
-"time"
+	"log"
+	"net/http"
+	"os"
+	"time"
 
-"github.com/go-chi/chi/v5"
-"github.com/go-chi/cors"
+	"desafio/internal/core"
+	httpx "desafio/internal/http"
+	"desafio/internal/store"
 )
 
-type Task struct {
-ID          string    `json:"id"`
-Title       string    `json:"title"`
-Description string    `json:"description"`
-Status      string    `json:"status"` // todo | doing | done
-CreatedAt   time.Time `json:"createdAt"`
-UpdatedAt   time.Time `json:"updatedAt"`
-}
-
 func main() {
-r := chi.NewRouter()
+	// Configuration
+	jsonPath := os.Getenv("TASKS_JSON_PATH")
+	if jsonPath == "" {
+		jsonPath = "tasks.json" // default path; with "go run -C backend ..." this lives in /backend
+	}
 
-// CORS for the Vite frontend (http://localhost:5173)
-r.Use(cors.Handler(cors.Options{
-AllowedOrigins:   []string{"http://localhost:5173"},
-AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
-ExposedHeaders:   []string{"Link"},
-AllowCredentials: false,
-MaxAge:           300,
-}))
+	// Seed (fallback)
+	now := time.Now()
+	seed := []core.Task{
+		{ID: "t1", Title: "Set up environment", Status: "todo", CreatedAt: now, UpdatedAt: now},
+		{ID: "t2", Title: "Backend skeleton", Status: "doing", CreatedAt: now, UpdatedAt: now},
+		{ID: "t3", Title: "Frontend skeleton", Status: "done", CreatedAt: now, UpdatedAt: now},
+	}
 
-// Seed tasks so the frontend shows dummy data
-now := time.Now()
-seed := []Task{
-	{ID: "t1", Title: "Set up environment", Status: "todo", CreatedAt: now, UpdatedAt: now},
-	{ID: "t2", Title: "Backend skeleton", Status: "doing", CreatedAt: now, UpdatedAt: now},
-	{ID: "t3", Title: "Frontend skeleton", Status: "done", CreatedAt: now, UpdatedAt: now},
+	// Try to load persisted data
+	loaded, err := store.LoadFromJSON(jsonPath)
+	if err != nil {
+		log.Printf("WARN: could not load %s: %v (using seed)", jsonPath, err)
+	}
+
+	var initial []core.Task
+	if len(loaded) > 0 {
+		initial = loaded
+	} else {
+		initial = seed
+	}
+
+	// Build store: in-memory + persistence wrapper
+	mem := store.NewMemoryStore(initial)
+	persisted := store.NewPersistedStore(mem, jsonPath)
+
+	// Build router
+	r := httpx.NewRouter(persisted)
+
+	addr := ":" + getPort()
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           r,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	httpx.LogStartup(addr)
+	log.Printf("Persistence: %s", jsonPath)
+	log.Fatal(srv.ListenAndServe())
 }
 
-// GET /tasks
-r.Get("/tasks", func(w http.ResponseWriter, r *http.Request) {
-w.Header().Set("Content-Type", "application/json; charset=utf-8")
-_ = json.NewEncoder(w).Encode(seed)
-})
-
-srv := &http.Server{
-Addr:              ":8080",
-Handler:           r,
-ReadHeaderTimeout: 5 * time.Second,
-}
-
-log.Println("API listening on http://localhost:8080")
-log.Fatal(srv.ListenAndServe())
+func getPort() string {
+	if p := os.Getenv("PORT"); p != "" {
+		return p
+	}
+	return "8080"
 }
