@@ -1,13 +1,29 @@
 ﻿// UTF-8
 import { useMemo, useState } from "react";
-import { DndContext, closestCorners, MouseSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
+import {
+  DndContext,
+  pointerWithin,           // B) prioritize the column under the pointer
+  DragOverlay,
+  MouseSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
 import { useTasks } from "../hooks/useTasks";
 import Column from "../components/Column";
+import TaskCard from "../components/TaskCard";
+import EditTaskModal from "../components/EditTaskModal";
 
 export default function Board() {
   const { grouped, status, error, createTask, updateTask, deleteTask, reorderTask } = useTasks();
   const [title, setTitle] = useState("");
   const [desc, setDesc] = useState("");
+
+  // A) local UI state for editing
+  const [editing, setEditing] = useState(null); // task or null
+
+  // B) DnD overlay + cleaner column targeting
+  const [activeTaskId, setActiveTaskId] = useState(null);
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
@@ -31,28 +47,42 @@ export default function Board() {
     return null;
   }
 
+  // B) DnD handlers
+  function handleDragStart(event) {
+    setActiveTaskId(event.active?.id ?? null);
+  }
+  function handleDragCancel() {
+    setActiveTaskId(null);
+  }
   function handleDragEnd(event) {
     const { active, over } = event;
+    setActiveTaskId(null);
     if (!over) return;
 
     const activeId = active.id;
     const originCol = active.data?.current?.columnId;
-    let destCol = over.data?.current?.columnId;
 
+    // Resolve destination column:
+    // - If dropping over a task → use that task's column
+    // - If dropping over a column droppable → use that column (append)
+    let destCol = over.data?.current?.columnId;
     if (!destCol) {
-      const maybeCol = String(over.id || "");
-      if (maybeCol.startsWith("column:")) destCol = maybeCol.split(":")[1];
+      const maybe = String(over.id || "");
+      if (maybe.startsWith("column:")) destCol = maybe.split(":")[1];
     }
     if (!destCol) return;
 
+    // Compute destination index
     let destIndex = 0;
     if (over.data?.current?.type === "task") {
       const meta = findTaskById(over.id);
       destIndex = meta ? meta.idx : 0;
     } else {
+      // Dropped on column surface → append at end
       destIndex = grouped[destCol].length;
     }
 
+    // If same column and same position, ignore
     if (originCol === destCol) {
       const meta = findTaskById(activeId);
       if (meta && meta.idx === destIndex) return;
@@ -62,6 +92,14 @@ export default function Board() {
       console.error("reorder failed:", err);
       alert("Reorder failed");
     });
+  }
+
+  // A) edit helpers
+  function openEdit(task) { setEditing(task); }
+  async function saveEdit(patch) {
+    if (!editing) return;
+    await updateTask(editing.id, patch);
+    setEditing(null);
   }
 
   return (
@@ -77,13 +115,42 @@ export default function Board() {
       {status === "loading" && <p>Loading tasks…</p>}
       {status === "error" && <p style={{ color: "salmon" }}>{error}</p>}
 
-      <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={handleDragEnd}>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={pointerWithin}   // B) more intuitive column targeting
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
+      >
         <div style={board()}>
-          <Column id="todo"  tasks={grouped.todo}  onEdit={(t)=>updateTask(t.id,{title: prompt("Edit title", t.title) || t.title})} onDelete={deleteTask}/>
-          <Column id="doing" tasks={grouped.doing} onEdit={(t)=>updateTask(t.id,{title: prompt("Edit title", t.title) || t.title})} onDelete={deleteTask}/>
-          <Column id="done"  tasks={grouped.done}  onEdit={(t)=>updateTask(t.id,{title: prompt("Edit title", t.title) || t.title})} onDelete={deleteTask}/>
+          <Column id="todo"  tasks={grouped.todo}  onEdit={openEdit} onDelete={deleteTask}/>
+          <Column id="doing" tasks={grouped.doing} onEdit={openEdit} onDelete={deleteTask}/>
+          <Column id="done"  tasks={grouped.done}  onEdit={openEdit} onDelete={deleteTask}/>
         </div>
+
+        {/* B) Drag overlay to reduce “snap” feeling while dragging */}
+        <DragOverlay>
+          {activeTaskId ? (
+            (() => {
+              const meta = findTaskById(activeTaskId);
+              return meta ? (
+                <div style={{ width: 280 }}>
+                  <TaskCard task={meta.task} onEdit={() => {}} onDelete={() => {}} columnId={meta.col} index={meta.idx} />
+                </div>
+              ) : null;
+            })()
+          ) : null}
+        </DragOverlay>
       </DndContext>
+
+      {/* A) Edit modal */}
+      {editing && (
+        <EditTaskModal
+          task={editing}
+          onSave={saveEdit}
+          onClose={() => setEditing(null)}
+        />
+      )}
     </div>
   );
 }
