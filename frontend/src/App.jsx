@@ -1,4 +1,3 @@
-import Board from "./pages/Board.jsx";
-export default function App() {
-  return <Board />;
-}
+﻿// UTF-8
+import Board from "./pages/Board";
+export default function App() { return <Board />; }
