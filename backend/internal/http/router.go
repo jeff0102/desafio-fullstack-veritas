@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
 	"desafio/internal/store"
@@ -17,6 +18,7 @@ func NewRouter(s store.TaskStore) *chi.Mux {
 	// Middlewares
 	r.Use(CommonMiddleware)
 	r.Use(JSONOnly)
+	r.Use(middleware.StripSlashes) // tolerate trailing/double slashes
 
 	// CORS
 	allowed := os.Getenv("ALLOWED_ORIGINS")
