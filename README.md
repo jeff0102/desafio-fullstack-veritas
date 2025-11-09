@@ -1,44 +1,44 @@
 # desafio-fullstack-veritas
 
 Mini Kanban board (Todo / Doing / Done) with **Frontend: React (Vite)** and **Backend: Go (chi)**.  
-Supports create, edit (title + description), drag & drop across/within columns, and delete.  
-Persistence via a simple JSON store behind a REST API.
 
-> This is a **skeleton README** (no diagrams yet). Diagrams will be added later under `/docs`.
+## Technical decisions
 
----
+This section explains *why* choices were made and the **trade-offs** accepted.
 
-## 1) Project layout
-
-```
-/backend
-  cmd/api/main.go
-  internal/
-    http/        # router + handlers
-    core/        # domain (Task)
-    store/       # memory + JSON persistence
-  tasks.json     # runtime data (ignored via .gitignore)
-
-/frontend
-  package.json
-  src/
-    lib/api.js
-    hooks/useTasks.js
-    components/{Column.jsx,TaskCard.jsx,Modal.jsx,EditTaskModal.jsx}
-    pages/Board.jsx
-    App.jsx
-  .env.example   # VITE_API_BASE_URL=http://localhost:8080
-
-/docs
-  # user-flow.png (required) - to be added later
-  # data-flow.png (optional) - to be added later
-
-README.md
-```
+### Backend (Go + chi)
+- **Why Go + chi**
+  - Small, explicit router; easy to reason about handlers/middleware.
+  - Go stdlib covers most needs; fast startup.
+- **Layering: `core` / `store` / `http`**
+  - Separates domain from transport/persistence; swapping the store is trivial.
+  - *Trade-off:* Slight overhead for a small codebase, but enables growth.
+- **JSON persistence (file) instead of DB**
+  - Instant local persistence, zero infra; fine for single-user demo.
+  - *Trade-off:* No concurrency guarantees or queries; would migrate to **PostgreSQL** if multi-user.
+- **Ordering model: `status` + `order`**
+  - Server reindexes on move → stable ordering per column; simpler frontend.
+  - *Trade-off:* No “true” concurrent edit handling.
+- **Endpoint `PUT /tasks/{id}/reorder`**
+  - Explicit intent (move + index); keeps update vs reorder semantics clean.
+  - *Trade-off:* One extra endpoint vs overloading `PUT /tasks/{id}`.
 
 ---
 
-## 2) How to run
+### Frontend (React + Vite + dnd-kit)
+- **Why plain JS (no TypeScript)**
+  - Smaller surface and faster setup.
+  - *Trade-off:* Fewer compile-time checks.
+- **Why dnd-kit (not react-beautiful-dnd)**
+  - Maintained, flexible sensors, `DragOverlay`, solid collision strategies.
+  - *Trade-off:* Slightly lower-level API → a few more lines, more control.
+- **UX choices**
+  - Column-priority targeting + `DragOverlay`; edit modal (title + description).
+  - *Trade-off:* Minimal accessibility (keyboard DnD omitted to stay in scope).
+
+---
+
+## 1) How to run
 
 ### A) With Docker (recommended)
 
@@ -61,91 +61,70 @@ docker compose run --rm frontend pnpm approve-builds
 
 # 4) Bring services up
 docker compose up -d
-
 ```
 
 - API → `http://localhost:8080`  
 - App → `http://localhost:5173`
 
-**Notes**
-- The compose file uses a **named volume** `frontend_node_modules` mounted at `/app/node_modules` to persist dependencies inside the container.
-- The frontend container auto-installs on startup **only if** `node_modules/.bin/vite` is missing; step (2) guarantees a clean, stable dev experience.
+> Note: Compose uses a **named volume** for `/app/node_modules` so the bind-mount `./frontend:/app` doesn’t hide dependencies.
+
+### B) Local (manual, no Docker)
+
+**Prerequisites:** Go 1.21+, Node 18+ with Corepack/pnpm.
+
+```bash
+# Enable pnpm via Corepack
+corepack enable
+corepack prepare pnpm@latest --activate
+pnpm -v
+```
+
+**Backend (terminal A)**
+```bash
+go mod download -C backend
+go run -C backend ./cmd/api   # http://localhost:8080
+```
+
+**Frontend (terminal B)**
+```bash
+cd frontend
+cp .env.example .env          # ensure VITE_API_BASE_URL=http://localhost:8080
+pnpm install
+pnpm approve-builds           # if prompted (esbuild)
+pnpm dev                      # http://localhost:5173
+```
 
 ---
-## 3) API (summary)
+
+## 2) API (minimal summary)
 
 Base URL: `http://localhost:8080`
 
-- `GET    /tasks`               → list (supports `?status=todo|doing|done`; sorted by `order`)
+- `GET    /tasks`               → list (`?status=todo|doing|done`; ordered by `order`)
 - `POST   /tasks`               → create `{ title, description? }`
-- `GET    /tasks/{id}`          → fetch by id
-- `PUT    /tasks/{id}`          → update partial `{ title?, description?, status? }`
+- `GET    /tasks/{id}`          → by id
+- `PUT    /tasks/{id}`          → partial update `{ title?, description?, status? }`
 - `DELETE /tasks/{id}`          → delete
 - `PUT    /tasks/{id}/reorder`  → move + reindex `{ status, index }`
 
-Notes:
-- CORS enabled for `http://localhost:5173` (Vite).
-- `order` is stable within each status; the server reindexes when items move.
-
 ---
 
-## 4) Frontend UX (high-level)
-
-- Three fixed columns: **Todo**, **Doing**, **Done**.
-- Add tasks (title + optional description).
-- Edit via **modal** (title + description).
-- Drag & drop (dnd-kit) with **column-priority** targeting and **DragOverlay**.
-- Basic feedback: loading / error messages.
-
----
-
-## 5) Technical decisions (short)
-
-- **Go + chi** router; layered backend:
-  - `core` (domain `Task` with `status`, `order`, timestamps)
-  - `store` (in-memory + JSON persisted)
-  - `http` (router + handlers)
-- **JSON persistence** (bonus) for quick local state without a DB.
-- **React + Vite**, **pnpm** for dependency management.
-- **dnd-kit** for modern drag & drop; **pointerWithin** collision and **DragOverlay**.
-- **Optimistic UI** on reorder; server-side reindex to guarantee final order.
-
----
-
-## 6) Known limitations
+## 3) Known limitations
 
 - No auth (local demo).
 - No pagination/search.
-- No automated tests yet.
-- Single-process writing model (JSON is not a multi-user DB).
+- No automated tests.
+- JSON file is single-process oriented.
 
 ---
 
-## 7) Future work
+## 4) Docs
 
-- Minimal API/store tests + CI.
-- Accessibility improvements (non-drag interactions).
-- Search/filter UI; inline edits; keyboard shortcuts.
-- Migrate persistence to SQLite/Postgres if multi-user or larger datasets.
+- `docs/user-flow.png`
 
----
+## 5) Next steps
 
-## 8) Docs & deliverables
-
-- **Required**: `docs/user-flow.png` (to be added).
-- **Optional**: `docs/data-flow.png` (to be added).
-
----
-
-## 9) Quick tips
-
-- Reset data: stop API, delete `backend/tasks.json`, restart API.
-- If frontend can’t reach API, ensure `frontend/.env` contains:
-  ```
-  VITE_API_BASE_URL=http://localhost:8080
-  ```
-- If `pnpm` isn’t recognized, run:
-  ```
-  corepack enable
-  corepack prepare pnpm@latest --activate
-  ```
+- Migrate store to **PostgreSQL**; add migrations and repository interfaces.
+- Add TypeScript, basic unit tests (store/http) and CI.
+- Improve accessibility and keyboard interactions; audit focus management.
+- Add filtering/search and pagination if the dataset grows.
