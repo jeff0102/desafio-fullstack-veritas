@@ -1,32 +1,41 @@
-package httpx
+// UTF-8
+package http
 
 import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
 	"desafio/internal/store"
 )
 
-func NewRouter(s store.TaskStore) *chi.Mux {
+func csvEnv(key string, fallback []string) []string {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func NewRouter(s store.TaskStore) http.Handler {
 	r := chi.NewRouter()
 
-	// Middlewares
-	r.Use(CommonMiddleware)
-	r.Use(JSONOnly)
-	r.Use(middleware.StripSlashes) // tolerate trailing/double slashes
-
-	// CORS
-	allowed := os.Getenv("ALLOWED_ORIGINS")
-	if strings.TrimSpace(allowed) == "" {
-		allowed = "http://localhost:5173"
-	}
+	// CORS: read from env (CSV). Default: localhost:5173
+	allowedOrigins := csvEnv("ALLOWED_ORIGINS", []string{"http://localhost:5173"})
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{allowed},
+		AllowedOrigins:   allowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
 		ExposedHeaders:   []string{"Link"},
@@ -34,10 +43,12 @@ func NewRouter(s store.TaskStore) *chi.Mux {
 		MaxAge:           300,
 	}))
 
-	// Health
+	// Optional: strip trailing slashes for route leniency
+	r.Use(StripSlashes())
+
+	// Health/root
 	r.Get("/", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Write([]byte("OK"))
+		w.WriteHeader(http.StatusNoContent)
 	})
 
 	// Tasks routes
@@ -46,3 +57,22 @@ func NewRouter(s store.TaskStore) *chi.Mux {
 
 	return r
 }
+
+// StripSlashes removes a single trailing slash ("/") from the request path.
+func StripSlashes() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			p := r.URL.Path
+			if len(p) > 1 && strings.HasSuffix(p, "/") {
+				r.URL.Path = strings.TrimRight(p, "/")
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// (Example) reasonable server timeouts can be used where needed.
+// Keeping here if you decide to build your own *http.Server in this package.
+var (
+	readHeaderTimeout = 5 * time.Second
+)

@@ -1,9 +1,11 @@
+// UTF-8
 package main
 
 import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"desafio/internal/core"
@@ -11,56 +13,49 @@ import (
 	"desafio/internal/store"
 )
 
+// envOr returns the value of key or fallback if blank.
+func envOr(key, fallback string) string {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	return v
+}
+
 func main() {
-	// Configuration
-	jsonPath := os.Getenv("TASKS_JSON_PATH")
-	if jsonPath == "" {
-		jsonPath = "tasks.json" // default path; with "go run -C backend ..." this lives in /backend
+	// --- config by env ---
+	tasksPath := envOr("TASKS_JSON_PATH", "tasks.json")
+	addr := envOr("PORT", ":8080")
+	if !strings.Contains(addr, ":") {
+		addr = ":" + addr
 	}
 
-	// Seed (fallback)
-	now := time.Now()
-	seed := []core.Task{
-		{ID: "t1", Title: "Set up environment", Status: "todo", CreatedAt: now, UpdatedAt: now},
-		{ID: "t2", Title: "Backend skeleton", Status: "doing", CreatedAt: now, UpdatedAt: now},
-		{ID: "t3", Title: "Frontend skeleton", Status: "done", CreatedAt: now, UpdatedAt: now},
-	}
-
-	// Try to load persisted data
-	loaded, err := store.LoadFromJSON(jsonPath)
-	if err != nil {
-		log.Printf("WARN: could not load %s: %v (using seed)", jsonPath, err)
-	}
-
+	// --- load existing tasks (if file exists) ---
 	var initial []core.Task
-	if len(loaded) > 0 {
-		initial = loaded
+	if tasks, err := store.LoadFromJSON(tasksPath); err != nil {
+		log.Fatalf("failed to load tasks from %s: %v", tasksPath, err)
 	} else {
-		initial = seed
+		initial = tasks // may be nil/empty -> starts blank
 	}
 
-	// Build store: in-memory + persistence wrapper
+	// --- wire store (memory seeded with initial), then wrap with persistence ---
 	mem := store.NewMemoryStore(initial)
-	persisted := store.NewPersistedStore(mem, jsonPath)
+	persisted := store.NewPersistedStore(mem, tasksPath)
 
-	// Build router
+	// --- router (CORS is handled inside router using env ALLOWED_ORIGINS) ---
 	r := httpx.NewRouter(persisted)
 
-	addr := ":" + getPort()
+	// --- server ---
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           r,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	httpx.LogStartup(addr)
-	log.Printf("Persistence: %s", jsonPath)
-	log.Fatal(srv.ListenAndServe())
-}
+	log.Printf("API listening on http://localhost%s", addr)
+	log.Printf("Persistence file: %s", tasksPath)
 
-func getPort() string {
-	if p := os.Getenv("PORT"); p != "" {
-		return p
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatal(err)
 	}
-	return "8080"
 }
