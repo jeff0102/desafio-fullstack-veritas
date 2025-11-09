@@ -1,0 +1,30 @@
+﻿services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: desafio-backend:dev
+    container_name: desafio-backend
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./backend:/srv
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    image: desafio-frontend:dev
+    container_name: desafio-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8080
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  frontend_node_modules:
