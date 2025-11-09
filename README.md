@@ -70,13 +70,14 @@ docker compose up -d
 
 ### B) Local (manual, no Docker)
 
-**Prerequisites:** Go 1.21+, Node 18+ with Corepack/pnpm.
+**Prerequisites:** Go 1.21+, Node 18+.
 
-```bash
-# Enable pnpm via Corepack
-corepack enable
-corepack prepare pnpm@latest --activate
-pnpm -v
+#### Install pnpm
+
+Windows fallback 
+```powershell
+# Install pnpm globally using npm.cmd
+npm.cmd install -g pnpm
 ```
 
 **Backend (terminal A)**
